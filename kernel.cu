@@ -1,121 +1,127 @@
 ﻿
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+#include "ols.cuh"
+#include "matrix.cuh"
+#include "gpu_timer.hpp"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <exception>
+#include <vector>
 
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size);
-
-__global__ void addKernel(int *c, const int *a, const int *b)
+__declspec(noreturn) void die(const char *msg)
 {
-    int i = threadIdx.x;
-    c[i] = a[i] + b[i];
+	fprintf(stderr, msg);
+	exit(1);
 }
 
-int main()
-{
-    const int arraySize = 5;
-    const int a[arraySize] = { 1, 2, 3, 4, 5 };
-    const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    int c[arraySize] = { 0 };
+void test_matrix_invert() {
+	cudaError_t cudaStatus;
+	const int N = 3;
+	float* in_matrix, * tmp_matrix, * out_matrix;
 
-    // Add vectors in parallel.
-    cudaError_t cudaStatus = addWithCuda(c, a, b, arraySize);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addWithCuda failed!");
-        return 1;
-    }
+	// values = X X^T where X = (1, 0.5, -1)
+	float values[9] = {
+		 4, -2,  0,
+		-2,  2,  3,
+		 0,  3, 10
+	};
 
-    printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",
-        c[0], c[1], c[2], c[3], c[4]);
+	cudaStatus = cudaMalloc((void**)&in_matrix, N * N * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		die("Failed to allocate memory\n");
 
-    // cudaDeviceReset must be called before exiting in order for profiling and
-    // tracing tools such as Nsight and Visual Profiler to show complete traces.
-    cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
-    }
+	cudaStatus = cudaMalloc((void**)&tmp_matrix, N * N * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		die("Failed to allocate memory\n");
 
-    return 0;
+	cudaStatus = cudaMalloc((void**)&out_matrix, N * N * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		die("Failed to allocate memory\n");
+
+	cudaStatus = cudaMemcpy(in_matrix, values, N * N * sizeof(float), cudaMemcpyHostToDevice);
+	if (cudaStatus != cudaSuccess)
+		die("Failed to copy memory\n");
+
+	cudaStatus = compute_inverse_matrix(in_matrix, tmp_matrix, out_matrix, N);
+	if (cudaStatus != cudaSuccess)
+		die("Failed to compute the inverse\n");
+
+	/*
+	Expected output:
+	2.75	5	-1.5
+	5		10		-3
+	-1.5	-3		1
+	*/
+	cudaStatus = cudaMemcpy(values, out_matrix, N * N * sizeof(float), cudaMemcpyDeviceToHost);
+	if (cudaStatus != cudaSuccess)
+		die("Failed to copy memory\n");
+
+	printf("Inverse matrix:\n");
+	for (int i = 0; i < N; i++) {
+		for (int j = 0; j < N; j++)
+			printf("%f ", values[i * N + j]);
+		printf("\n");
+	}
+
+	cudaFree(in_matrix);
+	cudaFree(tmp_matrix);
+	cudaFree(out_matrix);
 }
 
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t addWithCuda(int *c, const int *a, const int *b, unsigned int size)
+int main(int argc, char* argv[])
 {
-    int *dev_a = 0;
-    int *dev_b = 0;
-    int *dev_c = 0;
-    cudaError_t cudaStatus;
+	char* end;
+	cudaError_t cudaStatus;
 
-    // Choose which GPU to run on, change this on a multi-GPU system.
-    cudaStatus = cudaSetDevice(0);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-        goto Error;
-    }
+	if (argc != 2)
+		die("Usage: ./kernel <dimension>\n");
 
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
+	const int dimension = strtol(argv[1], &end, 10);
+	if (end != argv[1] + strlen(argv[1]))
+		die("Invalid argument\n");
 
-    cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
+	// Choose which GPU to run on, change this on a multi-GPU system.
+	cudaStatus = cudaSetDevice(0);
+	if (cudaStatus != cudaSuccess) {
+		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+		return -1;
+	}
 
-    cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMalloc failed!");
-        goto Error;
-    }
+	// Test the matrix inversion
+	//test_matrix_invert();
 
-    // Copy input vectors from host memory to GPU buffers.
-    cudaStatus = cudaMemcpy(dev_a, a, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
+	// Test the Cuda OLS class
+	{
+		GpuTimer bench;
+		std::vector<float> sample(dimension);
+		float expected;
 
-    cudaStatus = cudaMemcpy(dev_b, b, size * sizeof(int), cudaMemcpyHostToDevice);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
+		OLS ols(dimension);
+		if (ols.cudaStatus() != cudaSuccess)
+			die("Failed to allocate memory\n");
 
-    // Launch a kernel on the GPU with one thread for each element.
-    addKernel<<<1, size>>>(dev_c, dev_a, dev_b);
+		bench.Start();
+		for (int i = 0; i < 1e4; i++) {
+			// Build fake data
+			for (int j = 0; j < dimension; j++)
+				sample[j] = (float)rand() / RAND_MAX;
+			expected = (float)rand() / RAND_MAX;
 
-    // Check for any errors launching the kernel
-    cudaStatus = cudaGetLastError();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-        goto Error;
-    }
-    
-    // cudaDeviceSynchronize waits for the kernel to finish, and returns
-    // any errors encountered during the launch.
-    cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-        goto Error;
-    }
+			ols.add_sample(sample.data(), expected);
+			if (ols.cudaStatus() != cudaSuccess)
+				return 1;
+		}
 
-    // Copy output vector from GPU buffer to host memory.
-    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost);
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaMemcpy failed!");
-        goto Error;
-    }
+		bench.PrintElapsed();
 
-Error:
-    cudaFree(dev_c);
-    cudaFree(dev_a);
-    cudaFree(dev_b);
-    
-    return cudaStatus;
+		std::vector<float> est = ols.retrieve_estimator();
+
+		bench.PrintElapsed();
+		/*
+		for (float e : est)
+			printf("%f ", e);
+		*/
+	}
+
+	return 0;
 }

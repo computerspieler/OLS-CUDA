@@ -55,6 +55,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Warning>Wall</Warning>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -74,10 +75,18 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Warning>Wall</Warning>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <CudaCompile Include="matrix.cu" />
     <CudaCompile Include="kernel.cu" />
+    <CudaCompile Include="ols.cu" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="gpu_timer.hpp" />
+    <ClInclude Include="matrix.cuh" />
+    <ClInclude Include="ols.cuh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
