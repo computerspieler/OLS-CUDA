@@ -24,7 +24,6 @@ private:
 	const int m_dimension;
 
 	float* m_sample;
-	float* m_expected;
 	float* m_rhs;
 	float* m_mat_to_invert;
 

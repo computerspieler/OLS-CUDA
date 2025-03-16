@@ -66,7 +66,7 @@ __global__ void cmod(
 
 #define CHECK_CUDA_ERROR(msg) { \
 	if (status != cudaSuccess) { \
-		fprintf(stderr, msg "\n", cudaGetErrorString(status)); \
+		fprintf(stderr, "[" __FILE__ ":%d]" msg "\n", __LINE__, cudaGetErrorString(status)); \
 		return status; \
 	} \
 }

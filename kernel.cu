@@ -101,7 +101,7 @@ int main(int argc, char* argv[])
 			die("Failed to allocate memory\n");
 
 		bench.Start();
-		for (int i = 0; i < 1e4; i++) {
+		for (int i = 0; i < 1e5; i++) {
 			// Build fake data
 			for (int j = 0; j < dimension; j++)
 				sample[j] = (float)rand() / RAND_MAX;
@@ -117,10 +117,8 @@ int main(int argc, char* argv[])
 		std::vector<float> est = ols.retrieve_estimator();
 
 		bench.PrintElapsed();
-		/*
-		for (float e : est)
-			printf("%f ", e);
-		*/
+		//for (float e : est)
+		//	printf("%f ", e);
 	}
 
 	return 0;
