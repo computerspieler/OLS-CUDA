@@ -5,10 +5,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <exception>
 #include <vector>
 
-__declspec(noreturn) void die(const char *msg)
+void die(const char *msg) __attribute__ ((noreturn));
+void die(const char *msg)
 {
 	fprintf(stderr, msg);
 	exit(1);
