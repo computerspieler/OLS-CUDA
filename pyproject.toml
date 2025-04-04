@@ -1,0 +1,11 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "ols"
+version = "0.1.0"
+description = "An OLS written in CUDA"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []

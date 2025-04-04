@@ -11,7 +11,7 @@ public:
 	const std::vector<float> retrieve_estimator();
 
 	cudaError_t cudaStatus() const;
-
+	
 private:
 	void allocate_cuda_memory();
 	void clear_cuda_memory();
