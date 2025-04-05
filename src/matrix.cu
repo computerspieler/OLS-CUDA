@@ -38,21 +38,25 @@ __global__ void setToIdentity(
 __global__ void getMaxValue(
 	float* mat,
 	float* max_val,
-	int* col_id,
+	int* row_id,
 	int N,
-	int i
+	int i,
+	int j
 ) {
-	int j = blockIdx.x * blockDim.x + threadIdx.x;
-	float val = abs(mat[CTI(i, j)]);
-	if(val > *max_val) {
+	if(j < i)
+		return;
+
+	float val = mat[CTI(j, i)];
+	
+	if(abs(val) > abs(*max_val)) {
 		*max_val = val;
-		*col_id = i;
+		*row_id = j;
 	}
 }
 
 __global__ void swapRows(
 	float* mat,
-	int* col_id,
+	int* row_id,
 	int N,
 	int k
 ) {
@@ -61,12 +65,13 @@ __global__ void swapRows(
 		return;
 
 	float tmp = mat[CTI(k, j)];
-	mat[CTI(k, j)] = mat[CTI(*col_id, j)];
-	mat[CTI(*col_id, j)] = tmp;
+	mat[CTI(k, j)] = mat[CTI(*row_id, j)];
+	mat[CTI(*row_id, j)] = tmp;
 }
 
 __global__ void divideRow(
-	float* mat,
+	float* mat_out,
+	float* mat_tmp,
 	float* max_val,
 	int N,
 	int k
@@ -75,7 +80,32 @@ __global__ void divideRow(
 	if (j >= N)
 		return;
 
-	mat[CTI(k, j)] /= *max_val;
+	mat_tmp[CTI(k, j)] /= *max_val;
+	mat_out[CTI(k, j)] /= *max_val;
+}
+
+__global__ void substractRows(
+	float* mat_out,
+	float* mat_tmp,
+	int N,
+	int k
+) {
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i >= N || i == k)
+		return;
+
+	if (j >= N)
+		return;
+
+	float v1 = mat_tmp[CTI(i, k)] * mat_out[CTI(k, j)];
+	float v2 = mat_tmp[CTI(i, k)] * mat_tmp[CTI(k, j)];
+
+	mat_out[CTI(i, j)] -= v1;
+
+	if(j > k)
+		mat_tmp[CTI(i, j)] -= v2;
 }
 
 cudaError_t compute_inverse_matrix(
@@ -86,12 +116,12 @@ cudaError_t compute_inverse_matrix(
 ) {
 	cudaError_t status;
 	float *max_val;
-	int *max_val_col;
+	int *max_val_row;
 
 	status = cudaMalloc((void**)&max_val, sizeof(float));
 	CHECK_CUDA_ERROR("cudaMalloc failed! %s");
 
-	status = cudaMalloc((void**)&max_val_col, sizeof(int));
+	status = cudaMalloc((void**)&max_val_row, sizeof(int));
 	CHECK_CUDA_ERROR("cudaMalloc failed! %s");
 
 	status = cudaMemcpy(tmp, input, N * N * sizeof(float), cudaMemcpyDeviceToDevice);
@@ -107,39 +137,45 @@ cudaError_t compute_inverse_matrix(
 	for (int k = 0; k < N; k++) {
 		status = cudaMemset(max_val, 0, sizeof(float));
 		CHECK_CUDA_ERROR("cudaMemset failed! %s");
-
-		TRY_KERNEL(
-			getMaxValue << <dim3(N, 1), dim3(1, 1) >> > (
-				tmp, max_val, max_val_col, N, k
-			)
-		);
+		status = cudaMemset(max_val_row, 0, sizeof(int));
+		CHECK_CUDA_ERROR("cudaMemset failed! %s");
 
 		status = cudaDeviceSynchronize();
 		CHECK_CUDA_ERROR("An error occured while executing cudaDeviceSynchronize: %s");
+
+		for(int j = k; j < N; j ++) {
+			TRY_KERNEL(
+				getMaxValue << <dim3(1, 1), dim3(1, 1) >> > (
+					tmp, max_val, max_val_row, N, k, j
+				)
+			);
+		}
 		
 		TRY_KERNEL(
 			swapRows << <dim3((N + 31) / 32, 1), dim3(32, 1) >> > (
-				tmp, max_val_col, N, k
-			)
-		);
-		TRY_KERNEL(
-			divideRow << <dim3((N + 31) / 32, 1), dim3(32, 1) >> > (
-				tmp, max_val, N, k
-			)
-		);
-		
-		TRY_KERNEL(
-			swapRows << <dim3((N + 31) / 32, 1), dim3(32, 1) >> > (
-				output, max_val_col, N, k
-			)
-		);
-		TRY_KERNEL(
-			divideRow << <dim3((N + 31) / 32, 1), dim3(32, 1) >> > (
-				output, max_val, N, k
+				tmp, max_val_row, N, k
 			)
 		);
 
+		TRY_KERNEL(
+			swapRows << <dim3((N + 31) / 32, 1), dim3(32, 1) >> > (
+				output, max_val_row, N, k
+			)
+		);
 		
+		TRY_KERNEL(
+			divideRow << <dim3((N + 31) / 32, 1), dim3(32, 1) >> > (
+				output, tmp, max_val, N, k
+			)
+		);
+		
+		TRY_KERNEL(
+			substractRows << <dim3((N + 31) / 32, (N + 31) / 32), dim3(32, 32) >> > (
+				output, tmp, N, k
+			)
+		);
+		status = cudaDeviceSynchronize();
+		CHECK_CUDA_ERROR("An error occured while executing cudaDeviceSynchronize: %s");
 	}
 
 	status = cudaDeviceSynchronize();
@@ -148,7 +184,7 @@ cudaError_t compute_inverse_matrix(
 	status = cudaFree(max_val);
 	CHECK_CUDA_ERROR("cudaFree failed! %s");
 
-	status = cudaFree(max_val_col);
+	status = cudaFree(max_val_row);
 	CHECK_CUDA_ERROR("cudaFree failed! %s");
 
 	return status;

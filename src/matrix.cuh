@@ -8,9 +8,3 @@ cudaError_t compute_inverse_matrix(
 	float* output,
 	const int dimension
 );
-
-cudaError_t compute_cholesky_lower_matrix(
-	float* input,
-	float* output,
-	const int N
-);

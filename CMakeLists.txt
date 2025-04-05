@@ -3,6 +3,8 @@ project(${SKBUILD_PROJECT_NAME}
     VERSION ${SKBUILD_PROJECT_VERSION}
     LANGUAGES CXX CUDA)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ version selection")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -42,3 +44,36 @@ set_target_properties(ols
 )
 
 install(TARGETS ols DESTINATION .)
+
+# == External library ==
+add_library(ols_lib STATIC
+    src/matrix.cuh
+    src/matrix.cu
+    src/ols.cuh
+    src/ols.cu
+)
+
+target_compile_features(ols_lib PUBLIC cxx_std_11)
+ 
+# We need to explicitly state that we need all CUDA files in the 
+# particle library to be built with -dc as the member functions 
+# could be called by other libraries and executables
+set_target_properties(ols_lib
+    PROPERTIES CUDA_SEPARABLE_COMPILATION ON
+)
+ 
+add_executable(ols_test src/kernel.cu)
+ 
+set_property(TARGET ols_test 
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON
+)
+target_link_libraries(ols_test PRIVATE ols_lib)
+ 
+if(APPLE)
+    # We need to add the path to the driver (libcuda.dylib) as an rpath, 
+    # so that the static cuda runtime can find it at runtime.
+    set_property(TARGET ols_test 
+        PROPERTY
+        BUILD_RPATH ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES}
+    )
+endif()
